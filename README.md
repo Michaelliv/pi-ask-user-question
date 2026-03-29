@@ -37,7 +37,7 @@ Single question:
        All packages in one repo with workspaces
    2. Separate repos
        One repo per package
-   3. Other — Type a custom answer
+   3. Other: type here...|
 
  ↑↓ navigate • enter select • esc cancel
 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄

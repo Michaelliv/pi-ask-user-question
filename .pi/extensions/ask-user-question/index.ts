@@ -14,12 +14,8 @@ import { Type } from "@sinclair/typebox";
 import {
 	Container,
 	type Component,
-	Editor,
-	type EditorTheme,
 	Key,
 	matchesKey,
-	SelectList,
-	type SelectItem,
 	Spacer,
 	Text,
 	type TUI,
@@ -49,25 +45,6 @@ type Answers = Record<string, string>;
 
 // ── Helpers ──
 
-const FREEFORM_VALUE = "__freeform__";
-
-function selectListTheme(theme: Theme) {
-	return {
-		selectedPrefix: (t: string) => theme.fg("accent", t),
-		selectedText: (t: string) => theme.fg("accent", t),
-		description: (t: string) => theme.fg("muted", t),
-		scrollInfo: (t: string) => theme.fg("dim", t),
-		noMatch: (t: string) => theme.fg("warning", t),
-	};
-}
-
-function editorTheme(theme: Theme): EditorTheme {
-	return {
-		borderColor: (s: string) => theme.fg("accent", s),
-		selectList: selectListTheme(theme),
-	};
-}
-
 // ── MultiSelectList component ──
 
 class MultiSelectList implements Component {
@@ -77,10 +54,12 @@ class MultiSelectList implements Component {
 	private checked = new Set<number>();
 	private cachedWidth?: number;
 	private cachedLines?: string[];
+	private editingFreeform = false;
+	private freeformText = "";
+	private freeformCursor = 0;
 
 	onCancel?: () => void;
 	onSubmit?: (result: string) => void;
-	onEnterFreeform?: () => void;
 
 	constructor(options: QuestionOption[], private allowFreeform: boolean, theme: Theme) {
 		this.options = options;
@@ -106,6 +85,11 @@ class MultiSelectList implements Component {
 	}
 
 	handleInput(data: string): void {
+		if (this.editingFreeform) {
+			this.handleFreeformInput(data);
+			return;
+		}
+
 		if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
 			this.onCancel?.();
 			return;
@@ -137,28 +121,74 @@ class MultiSelectList implements Component {
 		}
 
 		if (matchesKey(data, Key.space)) {
-			if (this.isFreeformRow(this.selectedIndex)) { this.onEnterFreeform?.(); return; }
+			if (this.isFreeformRow(this.selectedIndex)) { this.enterFreeform(); return; }
 			this.toggle(this.selectedIndex);
 			this.invalidate();
 			return;
 		}
 
 		if (matchesKey(data, Key.enter)) {
-			if (this.isFreeformRow(this.selectedIndex)) { this.onEnterFreeform?.(); return; }
+			if (this.isFreeformRow(this.selectedIndex)) { this.enterFreeform(); return; }
 
 			const idx = this.selectedIndex;
 			if (this.checked.has(idx)) {
-				// Already checked → submit all checked
 				const labels = Array.from(this.checked)
 					.sort((a, b) => a - b)
 					.map((i) => this.options[i]?.label)
 					.filter((t): t is string => !!t);
 				if (labels.length > 0) this.onSubmit?.(labels.join(", "));
 			} else {
-				// Not checked → toggle it on
 				this.toggle(idx);
 				this.invalidate();
 			}
+		}
+	}
+
+	private enterFreeform(): void {
+		this.editingFreeform = true;
+		this.freeformText = "";
+		this.freeformCursor = 0;
+		this.invalidate();
+	}
+
+	private handleFreeformInput(data: string): void {
+		if (matchesKey(data, Key.escape)) {
+			this.editingFreeform = false;
+			this.invalidate();
+			return;
+		}
+		if (matchesKey(data, Key.ctrl("c"))) {
+			this.onCancel?.();
+			return;
+		}
+		if (matchesKey(data, Key.enter)) {
+			const text = this.freeformText.trim();
+			if (text) this.onSubmit?.(text);
+			return;
+		}
+		if (matchesKey(data, Key.backspace)) {
+			if (this.freeformCursor > 0) {
+				this.freeformText = this.freeformText.slice(0, this.freeformCursor - 1) + this.freeformText.slice(this.freeformCursor);
+				this.freeformCursor--;
+			}
+			this.invalidate();
+			return;
+		}
+		if (matchesKey(data, Key.left)) {
+			if (this.freeformCursor > 0) this.freeformCursor--;
+			this.invalidate();
+			return;
+		}
+		if (matchesKey(data, Key.right)) {
+			if (this.freeformCursor < this.freeformText.length) this.freeformCursor++;
+			this.invalidate();
+			return;
+		}
+		// Printable character
+		if (data.length === 1 && data >= " ") {
+			this.freeformText = this.freeformText.slice(0, this.freeformCursor) + data + this.freeformText.slice(this.freeformCursor);
+			this.freeformCursor++;
+			this.invalidate();
 		}
 	}
 
@@ -185,9 +215,17 @@ class MultiSelectList implements Component {
 
 			if (this.isFreeformRow(i)) {
 				const num = theme.fg("dim", `${i + 1}.`);
-				const label = theme.fg("text", theme.bold("Other"));
-				const desc = theme.fg("muted", "Type a custom answer");
-				lines.push(truncateToWidth(`${prefix} ${num}     ${label} ${theme.fg("dim", "—")} ${desc}`, width, ""));
+				if (this.editingFreeform && sel) {
+					const before = this.freeformText.slice(0, this.freeformCursor);
+					const cursor = this.freeformCursor < this.freeformText.length ? this.freeformText[this.freeformCursor] : " ";
+					const after = this.freeformText.slice(this.freeformCursor + 1);
+					const input = theme.fg("text", before) + theme.fg("accent", theme.bold(cursor)) + theme.fg("text", after);
+					lines.push(truncateToWidth(`${prefix} ${num}     ${theme.fg("accent", theme.bold("Other:"))} ${input}`, width, ""));
+				} else {
+					const label = theme.fg("text", theme.bold("Other"));
+					const desc = theme.fg("muted", "Type a custom answer");
+					lines.push(truncateToWidth(`${prefix} ${num}     ${label} ${theme.fg("dim", "—")} ${desc}`, width, ""));
+				}
 				continue;
 			}
 
@@ -227,10 +265,12 @@ class SingleSelectList implements Component {
 	private selectedIndex = 0;
 	private cachedWidth?: number;
 	private cachedLines?: string[];
+	private editingFreeform = false;
+	private freeformText = "";
+	private freeformCursor = 0;
 
 	onCancel?: () => void;
 	onSelect?: (label: string) => void;
-	onEnterFreeform?: () => void;
 
 	constructor(options: QuestionOption[], private allowFreeform: boolean, theme: Theme) {
 		this.options = options;
@@ -251,6 +291,11 @@ class SingleSelectList implements Component {
 	}
 
 	handleInput(data: string): void {
+		if (this.editingFreeform) {
+			this.handleFreeformInput(data);
+			return;
+		}
+
 		if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
 			this.onCancel?.();
 			return;
@@ -271,10 +316,57 @@ class SingleSelectList implements Component {
 		}
 
 		if (matchesKey(data, Key.enter) || matchesKey(data, Key.space)) {
-			if (this.isFreeformRow(this.selectedIndex)) { this.onEnterFreeform?.(); return; }
+			if (this.isFreeformRow(this.selectedIndex)) { this.enterFreeform(); return; }
 			const opt = this.options[this.selectedIndex];
 			if (opt) this.onSelect?.(opt.label);
 			else this.onCancel?.();
+		}
+	}
+
+	private enterFreeform(): void {
+		this.editingFreeform = true;
+		this.freeformText = "";
+		this.freeformCursor = 0;
+		this.invalidate();
+	}
+
+	private handleFreeformInput(data: string): void {
+		if (matchesKey(data, Key.escape)) {
+			this.editingFreeform = false;
+			this.invalidate();
+			return;
+		}
+		if (matchesKey(data, Key.ctrl("c"))) {
+			this.onCancel?.();
+			return;
+		}
+		if (matchesKey(data, Key.enter)) {
+			const text = this.freeformText.trim();
+			if (text) this.onSelect?.(text);
+			return;
+		}
+		if (matchesKey(data, Key.backspace)) {
+			if (this.freeformCursor > 0) {
+				this.freeformText = this.freeformText.slice(0, this.freeformCursor - 1) + this.freeformText.slice(this.freeformCursor);
+				this.freeformCursor--;
+			}
+			this.invalidate();
+			return;
+		}
+		if (matchesKey(data, Key.left)) {
+			if (this.freeformCursor > 0) this.freeformCursor--;
+			this.invalidate();
+			return;
+		}
+		if (matchesKey(data, Key.right)) {
+			if (this.freeformCursor < this.freeformText.length) this.freeformCursor++;
+			this.invalidate();
+			return;
+		}
+		if (data.length === 1 && data >= " ") {
+			this.freeformText = this.freeformText.slice(0, this.freeformCursor) + data + this.freeformText.slice(this.freeformCursor);
+			this.freeformCursor++;
+			this.invalidate();
 		}
 	}
 
@@ -301,9 +393,17 @@ class SingleSelectList implements Component {
 
 			if (this.isFreeformRow(i)) {
 				const num = theme.fg("dim", `${i + 1}.`);
-				const label = theme.fg("text", theme.bold("Other"));
-				const desc = theme.fg("muted", "Type a custom answer");
-				lines.push(truncateToWidth(`${prefix} ${num} ${label} ${theme.fg("dim", "—")} ${desc}`, width, ""));
+				if (this.editingFreeform && sel) {
+					const before = this.freeformText.slice(0, this.freeformCursor);
+					const cursor = this.freeformCursor < this.freeformText.length ? this.freeformText[this.freeformCursor] : " ";
+					const after = this.freeformText.slice(this.freeformCursor + 1);
+					const input = theme.fg("text", before) + theme.fg("accent", theme.bold(cursor)) + theme.fg("text", after);
+					lines.push(truncateToWidth(`${prefix} ${num} ${theme.fg("accent", theme.bold("Other:"))} ${input}`, width, ""));
+				} else {
+					const label = theme.fg("text", theme.bold("Other"));
+					const desc = theme.fg("muted", "Type a custom answer");
+					lines.push(truncateToWidth(`${prefix} ${num} ${label} ${theme.fg("dim", "—")} ${desc}`, width, ""));
+				}
 				continue;
 			}
 
@@ -343,21 +443,16 @@ class QuestionComponent extends Container {
 	private theme: Theme;
 	private onDone: (answer: string | null) => void;
 
-	private mode: "select" | "freeform" = "select";
 	private modeContainer: Container;
 	private helpText: Text;
 
 	private selectList?: SingleSelectList;
 	private multiSelectList?: MultiSelectList;
-	private editor?: Editor;
 
 	private _focused = false;
 	get focused(): boolean { return this._focused; }
 	set focused(v: boolean) {
 		this._focused = v;
-		if (this.editor && this.mode === "freeform") {
-			(this.editor as any).focused = v;
-		}
 	}
 
 	constructor(question: Question, tui: TUI, theme: Theme, onDone: (answer: string | null) => void, borderless = false) {
@@ -408,19 +503,14 @@ class QuestionComponent extends Container {
 	private updateHelp(): void {
 		if (!this.helpText) return;
 		const t = this.theme;
-		if (this.mode === "freeform") {
-			this.helpText.setText(t.fg("dim", "enter submit • shift+enter newline • esc back • ctrl+c cancel"));
-		} else if (this.question.multiSelect) {
+		if (this.question.multiSelect) {
 			this.helpText.setText(t.fg("dim", "↑↓ navigate • space toggle • enter submit • esc cancel"));
 		} else {
 			this.helpText.setText(t.fg("dim", "↑↓ navigate • enter select • esc cancel"));
 		}
 	}
 
-	// ── Select mode ──
-
 	private showSelectMode(): void {
-		this.mode = "select";
 		this.modeContainer.clear();
 
 		if (this.question.multiSelect) {
@@ -439,7 +529,6 @@ class QuestionComponent extends Container {
 		const sl = new SingleSelectList(this.question.options, true, this.theme);
 		sl.onSelect = (label) => this.onDone(label);
 		sl.onCancel = () => this.onDone(null);
-		sl.onEnterFreeform = () => this.showFreeformMode();
 		this.selectList = sl;
 		return sl;
 	}
@@ -449,56 +538,11 @@ class QuestionComponent extends Container {
 		const ml = new MultiSelectList(this.question.options, true, this.theme);
 		ml.onCancel = () => this.onDone(null);
 		ml.onSubmit = (result) => this.onDone(result);
-		ml.onEnterFreeform = () => this.showFreeformMode();
 		this.multiSelectList = ml;
 		return ml;
 	}
 
-	// ── Freeform mode ──
-
-	private showFreeformMode(): void {
-		this.mode = "freeform";
-		this.modeContainer.clear();
-
-		const editor = this.ensureEditor();
-		(editor as any).focused = this._focused;
-
-		this.modeContainer.addChild(new Text(this.theme.fg("accent", this.theme.bold("Custom answer")), 1, 0));
-		this.modeContainer.addChild(new Spacer(1));
-		this.modeContainer.addChild(editor);
-
-		this.updateHelp();
-		this.invalidate();
-		this.tui.requestRender();
-	}
-
-	private ensureEditor(): Editor {
-		if (this.editor) return this.editor;
-		const ed = new Editor(this.tui, editorTheme(this.theme));
-		ed.disableSubmit = false;
-		ed.onSubmit = (text: string) => {
-			const trimmed = text.trim();
-			this.onDone(trimmed || null);
-		};
-		this.editor = ed;
-		return ed;
-	}
-
 	handleInput(data: string): void {
-		if (this.mode === "freeform") {
-			if (matchesKey(data, Key.escape)) { this.showSelectMode(); return; }
-			if (matchesKey(data, Key.ctrl("c"))) { this.onDone(null); return; }
-			if (matchesKey(data, Key.ctrl("enter")) || matchesKey(data, "ctrl+enter")) {
-				const text = this.ensureEditor().getText().trim();
-				this.onDone(text || null);
-				return;
-			}
-			this.ensureEditor().handleInput(data);
-			this.tui.requestRender();
-			return;
-		}
-
-		// Select mode
 		if (this.question.multiSelect) {
 			this.ensureMultiSelect().handleInput?.(data);
 		} else {
@@ -635,18 +679,10 @@ class TabbedQuestions extends Container {
 
 	private updateHelp(): void {
 		const t = this.theme;
-		const qc = this.questionComponents[this.activeTab];
-		const mode = (qc as any)?.mode;
-
-		let base: string;
-		if (mode === "freeform") {
-			base = "enter submit • shift+enter newline • esc back";
-		} else {
-			const q = this.questions[this.activeTab];
-			base = q?.multiSelect
-				? "↑↓ navigate • space toggle • enter submit"
-				: "↑↓ navigate • enter select";
-		}
+		const q = this.questions[this.activeTab];
+		const base = q?.multiSelect
+			? "↑↓ navigate • space toggle • enter submit"
+			: "↑↓ navigate • enter select";
 
 		const nav = this.questions.length > 1 ? " • ←→ switch tab" : "";
 		const submit = this.answers.some((a) => a !== null) ? " • ctrl+s submit all" : "";
@@ -676,22 +712,15 @@ class TabbedQuestions extends Container {
 	handleInput(data: string): void {
 		// Global: left/right to switch tabs
 		if (matchesKey(data, Key.left) && this.questions.length > 1) {
-			// Only switch tabs if not in freeform mode (left arrow needed for editing)
-			const qc = this.questionComponents[this.activeTab];
-			if ((qc as any)?.mode !== "freeform") {
-				const prev = this.activeTab === 0 ? this.questions.length - 1 : this.activeTab - 1;
-				this.showTab(prev);
-				return;
-			}
+			const prev = this.activeTab === 0 ? this.questions.length - 1 : this.activeTab - 1;
+			this.showTab(prev);
+			return;
 		}
 
 		if (matchesKey(data, Key.right) && this.questions.length > 1) {
-			const qc = this.questionComponents[this.activeTab];
-			if ((qc as any)?.mode !== "freeform") {
-				const next = this.activeTab === this.questions.length - 1 ? 0 : this.activeTab + 1;
-				this.showTab(next);
-				return;
-			}
+			const next = this.activeTab === this.questions.length - 1 ? 0 : this.activeTab + 1;
+			this.showTab(next);
+			return;
 		}
 
 		// Ctrl+S to submit all answered so far
