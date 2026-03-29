@@ -219,7 +219,7 @@ class MultiSelectList implements Component {
 					const before = this.freeformText.slice(0, this.freeformCursor);
 					const cursor = this.freeformCursor < this.freeformText.length ? this.freeformText[this.freeformCursor] : " ";
 					const after = this.freeformText.slice(this.freeformCursor + 1);
-					const input = theme.fg("text", before) + theme.fg("accent", theme.bold(cursor)) + theme.fg("text", after);
+					const input = theme.fg("text", before) + "\x1b[7m" + cursor + "\x1b[27m" + theme.fg("text", after);
 					lines.push(truncateToWidth(`${prefix} ${num}     ${theme.fg("accent", theme.bold("Other:"))} ${input}`, width, ""));
 				} else {
 					const label = theme.fg("text", theme.bold("Other"));
@@ -397,7 +397,7 @@ class SingleSelectList implements Component {
 					const before = this.freeformText.slice(0, this.freeformCursor);
 					const cursor = this.freeformCursor < this.freeformText.length ? this.freeformText[this.freeformCursor] : " ";
 					const after = this.freeformText.slice(this.freeformCursor + 1);
-					const input = theme.fg("text", before) + theme.fg("accent", theme.bold(cursor)) + theme.fg("text", after);
+					const input = theme.fg("text", before) + "\x1b[7m" + cursor + "\x1b[27m" + theme.fg("text", after);
 					lines.push(truncateToWidth(`${prefix} ${num} ${theme.fg("accent", theme.bold("Other:"))} ${input}`, width, ""));
 				} else {
 					const label = theme.fg("text", theme.bold("Other"));
