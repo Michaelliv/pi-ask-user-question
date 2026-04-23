@@ -491,11 +491,6 @@ class QuestionComponent extends Container {
 		this.showSelectMode();
 	}
 
-	override invalidate(): void {
-		super.invalidate();
-		this.updateHelp();
-	}
-
 	override render(width: number): string[] {
 		return super.render(width).map((l) => truncateToWidth(l, width, ""));
 	}
