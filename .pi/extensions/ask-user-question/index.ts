@@ -237,7 +237,7 @@ class MultiSelectList implements Component {
 			const title = sel ? theme.fg("accent", theme.bold(opt.label)) : theme.fg("text", theme.bold(opt.label));
 			lines.push(truncateToWidth(`${prefix} ${num} ${cb} ${title}`, width, ""));
 
-			if (opt.description) {
+			if (sel && opt.description) {
 				const indent = "      ";
 				const wrapW = Math.max(10, width - indent.length);
 				for (const w of wrapTextWithAnsi(opt.description, wrapW)) {
@@ -414,7 +414,7 @@ class SingleSelectList implements Component {
 			const title = sel ? theme.fg("accent", theme.bold(opt.label)) : theme.fg("text", theme.bold(opt.label));
 			lines.push(truncateToWidth(`${prefix} ${num} ${title}`, width, ""));
 
-			if (opt.description) {
+			if (sel && opt.description) {
 				const indent = "      ";
 				const wrapW = Math.max(10, width - indent.length);
 				for (const w of wrapTextWithAnsi(opt.description, wrapW)) {
@@ -462,30 +462,25 @@ class QuestionComponent extends Container {
 		this.theme = theme;
 		this.onDone = onDone;
 
-		// Layout
+		// Compact layout: top divider only (no full box), merged header + question
+		// on one line, options list, help line. Keeps the widget short enough to
+		// fit in an overlay without pushing other content around.
 		if (!borderless) {
 			this.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-			this.addChild(new Spacer(1));
 		}
 
-		// Header
-		this.addChild(new Text(theme.fg("accent", theme.bold(question.header)), 1, 0));
-		this.addChild(new Spacer(1));
-
-		// Question text
-		this.addChild(new Text(theme.fg("text", theme.bold(question.question)), 1, 0));
-		this.addChild(new Spacer(1));
+		this.addChild(new Text(
+			`${theme.fg("accent", theme.bold(question.header))} ${theme.fg("dim", "\u2014")} ${theme.fg("text", question.question)}`,
+			1, 0,
+		));
 
 		// Mode container (select or freeform)
 		this.modeContainer = new Container();
 		this.addChild(this.modeContainer);
 
 		if (!borderless) {
-			this.addChild(new Spacer(1));
 			this.helpText = new Text("", 1, 0);
 			this.addChild(this.helpText);
-			this.addChild(new Spacer(1));
-			this.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 		}
 
 		this.showSelectMode();
@@ -817,17 +812,31 @@ Usage notes:
 
 			let result: Answers | null;
 
+			// Render as an overlay docked at the bottom-left of the terminal, full
+			// width, capped height. This sits where the editor normally is, avoids
+			// stacking on top of the existing chat history, and sidesteps the
+			// differential renderer's full-redraw path when total inline content
+			// exceeds terminal height (which would otherwise cause scroll storms).
+			const overlayOptions = {
+				overlay: true as const,
+				overlayOptions: {
+					width: "100%" as const,
+					maxHeight: "80%" as const,
+					anchor: "bottom-left" as const,
+				},
+			};
+
 			try {
 				if (questions.length === 1) {
 					const q = questions[0];
 					const answer = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
 						return new QuestionComponent(q, tui, theme, done);
-					});
+					}, overlayOptions);
 					result = answer !== null ? { [q.question]: answer } : null;
 				} else {
 					result = await ctx.ui.custom<Answers | null>((tui, theme, _kb, done) => {
 						return new TabbedQuestions(questions, tui, theme, done);
-					});
+					}, overlayOptions);
 				}
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
