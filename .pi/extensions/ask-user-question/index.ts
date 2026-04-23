@@ -838,9 +838,10 @@ Usage notes:
 			}
 
 			if (result === null) {
-				// Treat cancel as interrupt — abort the agent
-				ctx.abort();
-				return { content: [{ type: "text", text: "User interrupted" }] };
+				// Return a normal tool result so the model sees the cancel and can
+				// decide what to do. Calling ctx.abort() here would kill the whole
+				// agent turn, which is too aggressive for dismissing a single question.
+				return { content: [{ type: "text", text: "User cancelled the question" }] };
 			}
 
 			// Format answers for the LLM
