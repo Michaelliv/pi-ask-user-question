@@ -1,6 +1,6 @@
 {
   "name": "pi-ask-user-question",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Interactive multi-choice question tool for pi — clarify requirements, gather preferences, make decisions",
   "keywords": [
     "pi-package"
